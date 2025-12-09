@@ -1,7 +1,9 @@
 package com.example.keycloakdemo.config;
 
+import com.example.keycloakdemo.exception.CustomAccessDeniedHandler;
 import com.example.keycloakdemo.exception.JwtAuthenticationEntryPoint;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -22,6 +24,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+@Slf4j
 @Configuration
 @RequiredArgsConstructor
 @EnableMethodSecurity(prePostEnabled = true)
@@ -29,6 +32,7 @@ import java.util.stream.Stream;
 public class SecurityConfig {
 
     private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    private final CustomAccessDeniedHandler accessDeniedHandler;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -42,10 +46,14 @@ public class SecurityConfig {
                         .requestMatchers("/public/**").permitAll()
                         // Protected endpoints (require authentication)
                         .requestMatchers("/api/v1/auth/user-info").authenticated()
-                        .requestMatchers("/api/v1/auth/create").hasAnyRole("admin", "user")
+                        .requestMatchers("/api/v1/auth/debug/**").authenticated()
+                        .requestMatchers("/api/v1/auth/create").hasAuthority("ROLE_ADMIN")
                         .requestMatchers("/admin/**").hasRole("admin")
                         .requestMatchers("/api/users/**").hasAnyRole("admin", "user")
                         .anyRequest().authenticated()
+                )
+                .exceptionHandling(exceptions -> exceptions
+                        .accessDeniedHandler(accessDeniedHandler)
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
@@ -77,6 +85,7 @@ public class SecurityConfig {
                     Collection<GrantedAuthority> realmAuthorities = roles.stream()
                             .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
                             .collect(Collectors.toList());
+                    log.debug("Extracted realm roles: {} -> {}", roles, realmAuthorities);
                     authorities = Stream.concat(authorities.stream(), realmAuthorities.stream())
                             .collect(Collectors.toList());
                 }
@@ -87,6 +96,10 @@ public class SecurityConfig {
                 Map<String, Object> resourceAccess = jwt.getClaim("resource_access");
                 // You can extract client-specific roles here if needed
             }
+            
+            log.debug("Final authorities for JWT: {}", authorities.stream()
+                    .map(GrantedAuthority::getAuthority)
+                    .collect(Collectors.toList()));
             
             return authorities;
         };
